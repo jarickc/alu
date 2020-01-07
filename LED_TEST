@@ -1,0 +1,138 @@
+-- The goal here is to test every LED on the IO Shield with switches.
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity LED_TEST is
+port(
+io_led : out STD_LOGIC_VECTOR(23 downto 0);
+io_dip : in STD_LOGIC_VECTOR(23 downto 0)
+);
+end LED_TEST;
+
+architecture arch of LED_TEST is
+begin
+process(io_dip) -- Each If statement is one switch and one LED talking to each other.
+    begin
+        if io_dip(23) = '1' then
+            io_led(23) <= '1';
+        else
+            io_led(23) <= '0';
+    end if;
+        if io_dip(22) = '1' then
+            io_led(22) <= '1';
+        else
+            io_led(22) <= '0';
+    end if;
+        if io_dip(21) = '1' then
+            io_led(21) <= '1';
+        else
+            io_led(21) <= '0';
+    end if;
+        if io_dip(20) = '1' then
+            io_led(20) <= '1';
+        else
+            io_led(20) <= '0';
+    end if;
+            if io_dip(19) = '1' then
+            io_led(19) <= '1';
+        else
+            io_led(19) <= '0';
+    end if;
+        if io_dip(18) = '1' then
+            io_led(18) <= '1';
+        else
+            io_led(18) <= '0';
+    end if;
+         if io_dip(17) = '1' then
+            io_led(17) <= '1';
+        else
+            io_led(17) <= '0';
+    end if;
+            if io_dip(16) = '1' then
+            io_led(16) <= '1';
+        else
+            io_led(16) <= '0';
+    end if;
+            if io_dip(15) = '1' then
+            io_led(15) <= '1';
+        else
+            io_led(15) <= '0';
+    end if;
+            if io_dip(14) = '1' then
+            io_led(14) <= '1';
+        else
+            io_led(14) <= '0';
+    end if;
+            if io_dip(13) = '1' then
+            io_led(13) <= '1';
+        else
+            io_led(13) <= '0';
+    end if;
+            if io_dip(12) = '1' then
+            io_led(12) <= '1';
+        else
+            io_led(12) <= '0';
+    end if;
+            if io_dip(11) = '1' then
+            io_led(11) <= '1';
+        else
+            io_led(11) <= '0';
+    end if;
+            if io_dip(10) = '1' then
+            io_led(10) <= '1';
+        else
+            io_led(10) <= '0';
+    end if;
+            if io_dip(9) = '1' then
+            io_led(9) <= '1';
+        else
+            io_led(9) <= '0';
+    end if;
+            if io_dip(8) = '1' then
+            io_led(8) <= '1';
+        else
+            io_led(8) <= '0';
+    end if;
+            if io_dip(7) = '1' then
+            io_led(7) <= '1';
+        else
+            io_led(7) <= '0';
+    end if;
+            if io_dip(6) = '1' then
+            io_led(6) <= '1';
+        else
+            io_led(6) <= '0';
+    end if;
+            if io_dip(5) = '1' then
+            io_led(5) <= '1';
+        else
+            io_led(5) <= '0';
+    end if;
+            if io_dip(4) = '1' then
+            io_led(4) <= '1';
+        else
+            io_led(4) <= '0';
+    end if;
+            if io_dip(3) = '1' then
+            io_led(3) <= '1';
+        else
+            io_led(3) <= '0';
+    end if;
+            if io_dip(2) = '1' then
+            io_led(2) <= '1';
+        else
+            io_led(2) <= '0';
+    end if;
+            if io_dip(1) = '1' then
+            io_led(1) <= '1';
+        else
+            io_led(1) <= '0';
+    end if;
+            if io_dip(0) = '1' then
+            io_led(0) <= '1';
+        else
+            io_led(0) <= '0';
+    end if;
+    end process;
+end arch;

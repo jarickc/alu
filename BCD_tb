@@ -1,0 +1,17 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use ieee.NUMERIC_STD.all;
+
+entity BCD_tb is
+end BCD_tb;
+
+architecture tb of BCD_tb is
+signal input : STD_LOGIC_VECTOR(13 downto 0);
+signal BCD_1, BCD_10, BCD_100, BCD_1000 : STD_LOGIC_VECTOR(3 downto 0);
+begin
+UUT: entity work.BCD port map (input => input, BCD_1 => BCD_1, BCD_10 => BCD_10, BCD_100 => BCD_100, BCD_1000 => BCD_1000);
+
+input <= "10010010000000";
+
+end tb;

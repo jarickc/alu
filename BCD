@@ -1,0 +1,54 @@
+-- Double Dabble code for binary-to-BCD conversion.
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use ieee.NUMERIC_STD.all;
+
+entity BCD is
+port(
+input : in STD_LOGIC_VECTOR(13 downto 0);
+BCD_1, BCD_10, BCD_100, BCD_1000 : out STD_LOGIC_VECTOR(3 downto 0) 
+);
+end BCD;
+
+architecture arch of BCD is 
+signal inshift : STD_LOGIC_VECTOR(13 downto 0); -- Used to manipulate the input.
+signal in_1, in_10, in_100, in_1000 : STD_LOGIC_VECTOR(3 downto 0); -- Used to read different portions of the input.
+begin
+inshift <= input;
+in_1 <= "0000";
+in_10 <= "0000";
+in_100 <= "0000";
+in_1000 <= "0000";
+process(input)
+begin
+
+	while (inshift > 0) loop -- When the original input is 0, that means all other bits have been properly shifted.
+	-- Left Shift
+	inshift <=  inshift(12 downto 0) & in_1000(3);
+	in_1 <= in_1(2 downto 0) & inshift(12);
+	in_10 <= in_10(2 downto 0) & in_1(3);
+	in_100 <= in_100(2 downto 0) & in_10(3);
+	in_1000 <= in_1000(2 downto 0) & in_100(3);
+
+	if (in_1 > 4) then -- Adds 3 to each digit if that digit is greater than 4.
+		in_1 <= in_1 + 3;
+	end if;
+	if (in_10 > 4) then
+		in_10 <= in_10 + 3;
+	end if;
+	if (in_100 > 4) then
+		in_100 <= in_100 + 3;
+	end if;
+	if (in_1000 > 4) then
+		in_1000 <= in_1000 + 3;
+	end if;
+	end loop;
+end process;
+-- Separates the BCD into separate digits that can be easily outputted to the display later on.
+BCD_1 <= in_1;
+BCD_10 <= in_10;
+BCD_100 <= in_100;
+BCD_1000 <= in_1000;
+		
+end arch;

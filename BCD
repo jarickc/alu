@@ -6,49 +6,73 @@ use ieee.NUMERIC_STD.all;
 
 entity BCD is
 port(
-input : in STD_LOGIC_VECTOR(13 downto 0);
+input : in STD_LOGIC_VECTOR(15 downto 0);
+reset : in STD_LOGIC; -- State where variables are zeroed.
+switch : in STD_LOGIC; -- State where program sits while waiting for an input.
 BCD_1, BCD_10, BCD_100, BCD_1000 : out STD_LOGIC_VECTOR(3 downto 0) 
 );
 end BCD;
 
 architecture arch of BCD is 
-signal inshift : STD_LOGIC_VECTOR(13 downto 0); -- Used to manipulate the input.
+signal bcd : STD_LOGIC_VECTOR(15 downto 0); -- Used to manipulate the input.
+signal finish : STD_LOGIC_VECTOR(15 downto 0); -- Used to check for when all of the input has been shifted through.
 signal in_1, in_10, in_100, in_1000 : STD_LOGIC_VECTOR(3 downto 0); -- Used to read different portions of the input.
+signal state : STD_LOGIC_VECTOR(3 downto 0) := "1000"; -- Doesn't activate until reset conditionn deactivates.
+signal clk : STD_LOGIC := '1';
 begin
-inshift <= input;
-in_1 <= "0000";
-in_10 <= "0000";
-in_100 <= "0000";
-in_1000 <= "0000";
-process(input)
+clk <= not clk after 10 ns; -- Clock
+process(input, reset)
 begin
+	if (reset = '1') then -- Initial reset
+		in_1 <= "0000";
+		in_10 <= "0000";
+		in_100 <= "0000";
+		in_1000 <= "0000";
+		bcd <= "0000000000000000";
+	elsif (clk'EVENT and clk = '1') then -- Starts on clock
+	case(state) is
+		when "1000" => -- Idle
+			if (switch = '1') then -- Switch is enabled in test bench.
+				finish <= input;
+				state <= "0100";
+			elsif (switch = '0') then
+				state <= "1000";
+			end if;
+		when "0010" => -- Finished
+			BCD_1 <= in_1;
+			BCD_10 <= in_10;
+			BCD_100 <= in_100;
+			BCD_1000 <= in_1000;
+		when "0100" => -- Conversion
+			if (finish = "0000000000000000") then -- Finishes conversion if the original input has all 0's. Allows for inputs of many sizes.
+				state <= "0010";
+			else	
+				bcd <= bcd(15 downto 1) & finish(15); -- Shift Left
+				finish <= finish(14 downto 0) & '0';
 
-	while (inshift > 0) loop -- When the original input is 0, that means all other bits have been properly shifted.
-	-- Left Shift
-	inshift <=  inshift(12 downto 0) & in_1000(3);
-	in_1 <= in_1(2 downto 0) & inshift(12);
-	in_10 <= in_10(2 downto 0) & in_1(3);
-	in_100 <= in_100(2 downto 0) & in_10(3);
-	in_1000 <= in_1000(2 downto 0) & in_100(3);
+				-- Separates the BCD into separate digits that can be easily outputted to the display later on.
+				in_1 <= bcd(3 downto 0);
+				in_10 <= bcd(7 downto 4);
+				in_100 <= bcd(11 downto 8);
+				in_1000 <= bcd(15 downto 12);
 
-	if (in_1 > 4) then -- Adds 3 to each digit if that digit is greater than 4.
-		in_1 <= in_1 + 3;
+				if (in_1 > 4) then -- Adds 3 to each digit if that digit is greater than 4.
+					in_1 <= in_1 + 3;
+				end if;
+				if (in_10 > 4) then
+					in_10 <= in_10 + 3;
+				end if;
+				if (in_100 > 4) then
+					in_100 <= in_100 + 3;
+				end if;
+				if (in_1000 > 4) then
+					in_1000 <= in_1000 + 3;
+				end if;
+				state <= "0100";
+			end if;
+		when others =>
+			state <= "0100";
+	end case;
 	end if;
-	if (in_10 > 4) then
-		in_10 <= in_10 + 3;
-	end if;
-	if (in_100 > 4) then
-		in_100 <= in_100 + 3;
-	end if;
-	if (in_1000 > 4) then
-		in_1000 <= in_1000 + 3;
-	end if;
-	end loop;
 end process;
--- Separates the BCD into separate digits that can be easily outputted to the display later on.
-BCD_1 <= in_1;
-BCD_10 <= in_10;
-BCD_100 <= in_100;
-BCD_1000 <= in_1000;
-		
 end arch;

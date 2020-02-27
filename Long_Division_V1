@@ -1,0 +1,56 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use ieee.numeric_std.all;
+
+Entity divide is
+Port(
+remainder : out STD_LOGIC_VECTOR(15 downto 0);
+dividend : in STD_LOGIC_VECTOR(15 downto 0);
+divisor : in STD_LOGIC_VECTOR(15 downto 0);
+quotient : out STD_LOGIC_VECTOR(15 downto 0);
+switch : in STD_LOGIC
+);
+end divide;
+
+Architecture arch of divide is
+type machine is (init, shift);
+signal state : machine;
+signal int_divid : STD_LOGIC_VECTOR(15 downto 0);
+signal int_quot : STD_LOGIC_VECTOR(15 downto 0);
+signal sub : STD_LOGIC_VECTOR(15 downto 0);
+signal error : STD_LOGIC := '0';
+begin
+process(dividend, divisor) is
+variable n : integer range 0 to 100;
+begin
+int_divid <= dividend;
+  case(state) is
+    when init =>
+      if switch <= '1' THEN
+        state <= shift;
+      else
+        state <= init;
+      end if;
+
+    when shift =>
+
+    if divisor = "0000000000000000" THEN
+      error <= '1';
+    else
+    for n in 0 to 15 loop
+      if int_divid(n downto 0) > divisor THEN
+        int_quot(n) <= '1';
+        if int_divid(n) = '1' then
+          sub <= int_divid(n downto 0) - divisor;
+          int_divid <= int_divid(15 downto n) & sub;
+        end if;
+      else
+        int_quot(n) <= '0';
+      end if;
+      end loop;
+    end if;
+  end case;
+quotient <= int_quot;
+end process;
+ end arch;

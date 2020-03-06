@@ -1,0 +1,667 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use ieee.numeric_std.all;
+
+entity State_Machine is
+Port (
+    led : out STD_LOGIC_VECTOR(7 downto 0);
+    io_led : out STD_LOGIC_VECTOR(23 downto 0);
+    io_dip : in STD_LOGIC_VECTOR(23 downto 0);
+    clk : in STD_LOGIC;
+    io_seg : out STD_LOGIC_VECTOR(7 downto 0);
+    io_sel : out STD_LOGIC_VECTOR(3 downto 0);
+    io_op : in STD_LOGIC_VECTOR(4 downto 0);
+    rst_n : in STD_LOGIC
+);
+end State_Machine;
+
+architecture Behavioral of State_Machine is
+
+    type machine is(init, toin, in1, toin2, to_sh, in2, toop, operation, store, load, arith, logic, toresult, result); -- States, from first to last.
+    type choose is(add, sub, mul, div, comp, sh_r, sh_l); -- Possible operations to choose from.
+    signal state : machine := init;
+    signal oper_sel : choose;
+    type mem is array (0 to 255) of STD_LOGIC_VECTOR(15 downto 0);
+  signal arry : mem;
+  -- The name for the program memory.
+  signal input_BCD : STD_LOGIC_VECTOR(3 downto 0);   
+  -- Breaks up BCD_result into 4 digits and cycles very quickly.
+  signal BCD_result : STD_LOGIC_VECTOR(15 downto 0);
+  -- The connection between the code and the display. (In BCD)
+  signal operand_1 : STD_LOGIC_VECTOR(15 downto 0);
+  -- Input from DIP switches during state "in1".
+  signal operand_2 : STD_LOGIC_VECTOR(15 downto 0);
+  -- Input from DIP switches during state "in2".
+  signal output : STD_LOGIC_VECTOR(15 downto 0);
+  -- Result from ALU calculations.
+  signal flipflop : STD_LOGIC_VECTOR(1 downto 0) := "00";
+  -- Used to require a consistent input from certain buttons.
+  signal io_segCount : STD_LOGIC_VECTOR(19 downto 0);
+  -- Counts to 100 million for switch debouncer.
+  signal io_segActivate : STD_LOGIC_VECTOR(1 downto 0);
+  -- Rapidly changes which digit is powered on 7 segment display.
+  signal addsub : STD_LOGIC_VECTOR(16 downto 0);
+  -- Intermediate variable for cout analysis.
+  signal cout : STD_LOGIC;
+  -- Detects if a number goes negative or over 9999.
+  signal ln : STD_LOGIC_VECTOR(1 downto 0);
+  -- "letter or number" divides 7 segment display decoder into 2 groups.
+  signal mul_v : STD_LOGIC_VECTOR(31 downto 0);
+  -- Intermediate variable that captures the computer's multiplication.
+  signal input_char : STD_LOGIC_VECTOR(4 downto 0);
+  -- Takes character inputs and decodes them for display on the Shield.
+  signal char_result : STD_LOGIC_VECTOR(19 downto 0);
+  -- Character messages, stored per frame. 
+  signal int_divid : STD_LOGIC_VECTOR(15 downto 0) := (others => '0');
+  -- The base dividend that is shifted into for division.
+  signal int_quot : STD_LOGIC_VECTOR(15 downto 0) := (others => '0'); 
+  -- Allows the quotient to be built over 15 loops.
+  
+  function  divide  (a : STD_LOGIC_VECTOR; b : STD_LOGIC_VECTOR) return STD_LOGIC_VECTOR is
+    variable a1 : STD_LOGIC_VECTOR(a'length-1 downto 0):=a;
+    variable b1 : STD_LOGIC_VECTOR(b'length-1 downto 0):=b;
+    variable p1 : STD_LOGIC_VECTOR(b'length downto 0):= (others => '0');
+    variable i : integer:=0;
+    begin
+    for i in 0 to b'length-1 loop
+      p1(b'length-1 downto 1) := p1(b'length-2 downto 0);
+      p1(0) := a1(a'length-1);
+      a1(a'length-1 downto 1) := a1(a'length-2 downto 0);
+      p1 := p1-b1;
+      if(p1(b'length-1) ='1') then
+        a1(0) :='0';
+      p1 := p1+b1;
+    else
+      a1(0) :='1';
+    end if;
+  end loop;
+return a1;
+end divide;
+
+  function to_bcd ( bin : std_logic_vector(15 downto 0) ) return std_logic_vector is
+    -- Used to convert a binary input to BCD.
+    variable i : integer:=0;
+    -- Counts shifts.
+    variable bcd : std_logic_vector(15 downto 0) := (others => '0');
+    -- The "scratch" space.
+    variable bint : std_logic_vector(15 downto 0) := bin;
+    -- The input. "bin" is given values throughout the code.
+  begin
+    for i in 0 to 15 loop
+    -- repeats 16 times to shift all digits.
+    bcd := bcd(14 downto 0) & bint(15);
+    bint := bint(14 downto 0) & bcd(15);
+    -- Shifts the bits left.
+
+    -- Adds 3 if any BCD digit is greater than 4.
+    if(i < 15 and bcd(3 downto 0) > "0100") then
+      bcd(3 downto 0) := bcd(3 downto 0) + "0011";
+    end if;
+    if(i < 15 and bcd(7 downto 4) > "0100") then --add 3 if BCD digit is greater than 4.
+      bcd(7 downto 4) := bcd(7 downto 4) + "0011";
+    end if;
+    if(i < 15 and bcd(11 downto 8) > "0100") then  --add 3 if BCD digit is greater than 4.
+      bcd(11 downto 8) := bcd(11 downto 8) + "0011";
+    end if;
+    if(i < 15 and bcd(15 downto 12) > "0100") then  --add 3 if BCD digit is greater than 4.
+      bcd(15 downto 12) := bcd(15 downto 12) + "0011";
+    end if;
+    end loop;
+    return bcd;
+  end to_bcd;
+
+begin -- Architecture begins.
+
+  io_segActivate <= io_segCount (19 downto 18);
+  -- Refreshes io_segActivate every 10.5 ms.
+  process(rst_n, io_op, clk)
+    VARIABLE count :  INTEGER RANGE 0 TO 150000000 := 0;
+    VARIABLE init_count : INTEGER RANGE 0 to 100000000 := 0;
+    VARIABLE op : INTEGER RANGE 0 to 6;
+    VARIABLE addr : INTEGER RANGE 0 to 255;
+    variable sh : natural := 0;
+  begin
+    if (rst_n = '0') then
+    -- Reset state, has priority over all states.
+        io_seg <= "10101111";
+        state <= init;
+        io_led <= "000000000000000000000000";
+        io_segCount <= "00000000000000000000";
+        led <= "00000000";
+        io_sel <= "0111";
+    elsif (clk'EVENT and clk = '1') then
+    -- Rising edge of clock
+
+    -- Counts up to 100000000, then restarts. Used to cycle digit selection.
+    io_segCount <= io_Segcount + 1;
+    if (io_segCount = "11111111111111111111") then
+      io_segCount <= "00000000000000000000";
+    end if;
+
+                  -- Case statements used in the program.
+
+    -- Decodes BCD inputs into the 7 segmnet display.
+    if (ln = "11") then
+    -- If numbers are desired
+      case (input_BCD) is
+        when "0000" => io_seg <= "11000000"; -- Zero
+        when "0001" => io_seg <= "11111001"; -- One or I
+        when "0010" => io_seg <= "10100100"; -- Two
+        when "0011" => io_seg <= "10110000"; -- Three
+        when "0100" => io_seg <= "10011001"; -- Four
+        when "0101" => io_seg <= "10010010"; -- Five or S
+        when "0110" => io_seg <= "10000010"; -- Six
+        when "0111" => io_seg <= "11111000"; -- Seven or T
+        when "1000" => io_seg <= "10000000"; -- Eight
+        when "1001" => io_seg <= "10010000"; -- Nine
+        when "1011" => io_seg <= "11000110"; -- Less than
+        when "1010" => io_seg <= "11110000"; -- Greater than
+        when "1111" => io_seg <= "10111110"; -- Equal to
+		when others => io_seg <= "11111111"; -- 1101
+	  end case;
+    end if;
+    if (ln = "01") then 
+    -- Animation frames and error letters
+        case(input_BCD) is
+        when "1000" => io_seg <= "11110011"; -- Bottom left hand
+        when "0100" => io_seg <= "10111011"; -- Middle left hand
+        when "0010" => io_Seg <= "11111000"; -- Top left hand
+        when "1100" => io_seg <= "11100111"; -- Bottom right hand
+        when "0011" => io_seg <= "10101111"; -- Middle right hand
+        when "0101" => io_seg <= "11001110"; -- Top right hand
+        when "1010" => io_seg <= "11100101"; -- Left smile
+        when "1011" => io_seg <= "11010011"; -- Right smile
+        when "1111" => io_seg <= "10011101"; -- Smile up
+        when others => io_seg <= "11111111"; -- Nothing
+        end case;
+    end if;
+    if (ln = "10") then
+    -- Init animation
+        case (input_BCD) is
+            when "1000" => io_seg <= "10001001"; -- H
+            when "0100" => io_seg <= "11111001"; -- I
+            when "0010" => io_seg <= "11110110"; -- Eyes
+            when "0001" => io_seg <= "11110000"; -- ]
+            when "1111" => io_seg <= "10111111"; -- Nose
+            when others => io_seg <= "11111111"; -- Nothing
+        end case;
+    end if;
+    if (ln = "00") then
+    -- If messages are desired
+	  case (input_char) is
+	    when "01000" => io_seg <= "10001000"; -- A.
+	    when "00100" => io_seg <= "10000011"; -- b.
+        when "01100" => io_seg <= "11000110"; -- C.
+        when "00010" => io_seg <= "10100001"; -- d.
+        when "01010" => io_seg <= "10000110"; -- E.
+        when "00110" => io_seg <= "10000011"; -- F
+        when "01110" => io_seg <= "10010000"; -- G.
+        when "10000" => io_seg <= "10001001"; -- H.
+        when "11000" => io_seg <= "11111001"; -- I.
+        when "10100" => io_seg <= "11111001"; -- J
+        when "11100" => io_seg <= "11111011"; -- K
+        when "10010" => io_seg <= "11000111"; -- L.
+        when "11010" => io_seg <= "10101111"; -- r.
+	    when "10110" => io_seg <= "10101011"; -- n.
+	    when "11110" => io_seg <= "11000000"; -- O.
+        when "00001" => io_seg <= "10001100"; -- P.
+        when "01001" => io_seg <= "10010010"; -- S.
+        when "00101" => io_seg <= "11111000"; -- T (7).
+        when "01101" => io_seg <= "11100011"; -- u.
+        when "00011" => io_seg <= "10101011"; -- Y
+        when "01011" => io_seg <= "11000001"; -- U
+        when "00111" => io_seg <= "10100100"; -- 2.
+        when "01111" => io_seg <= "10110000"; -- 3.
+        when "10001" => io_seg <= "10011001"; -- 4.
+        when "11001" => io_seg <= "10010010"; -- 5.
+        when "10101" => io_seg <= "11001000"; -- M.
+	    when "11101" => io_seg <= "10100100"; -- 
+	    when "10011" => io_seg <= "10001100"; -- 
+        when "11011" => io_seg <= "10001000"; -- 
+        when "10111" => io_seg <= "10100001"; -- 
+        when "11111" => io_seg <= "11000001"; -- 
+        when others => io_seg <= "11111111"; -- Nothing Displayed from "0000"
+      end case;
+    end if;
+    -- The ALU section of the code.
+    if (state = result) then
+    case (oper_sel) is
+      when add =>
+        addsub <= ('0' & operand_1) + ('0' & operand_2);
+        output <= operand_1 + operand_2;
+        cout <= addsub(16);
+      when sub =>
+        addsub <= ('0' & operand_1) - ('0' & operand_2);
+        if (operand_1 = operand_2) then
+          output <= "0000000000000000";
+        else
+          cout <= addsub(16);
+          output <= operand_1 - operand_2;
+        end if;
+      when mul =>
+        mul_v <= operand_1 * operand_2;
+        if (mul_v(31 downto 16) > "0000000000000000") then
+            output <= "1111111111111111";
+        elsif (operand_1 = "0000000000000000" or operand_2 = "0000000000000000") then
+            output <= "0000000000000000";
+        else
+            output <= mul_v(15 downto 0);
+        end if;
+      when div => -- OP_2 is divisor, OP_1 is dividend
+        if operand_2 = "0000000000000000" THEN
+          output <= "1111111111111111"; -- Error condition
+        else
+          output <= divide (operand_1, operand_2);
+       end if;
+       
+      when comp =>
+        ln <= "11";
+        if (operand_1 < operand_2) then
+            BCD_result <= "0001101100101101"; -- 1 is less than 2
+        elsif (operand_1 > operand_2) then
+            BCD_result <= "0001101000101101"; -- 1 is greater than 2
+        elsif (operand_1 = operand_2) then
+            BCD_result <= "0001111100101101"; -- 1 is equal to 2
+        end if;
+      when sh_r => -- Right Shift
+            output <= operand_1(0) & operand_1(15 downto 1);
+      when sh_l => -- Left Shift
+            output <= operand_1(14 downto 0) & operand_1(15);
+      when others =>
+		BCD_result <= "1011100000000000"; -- NO
+    end case;
+    end if;
+    -- Allows different numbers to be displayed at the "same time".
+    if (ln = "00") then -- Characters
+        case (io_segActivate) is
+          when "00" => -- First digit
+            io_sel <= "0111";
+            input_char <= char_result(19 downto 15);
+          when "01" => -- Second digit
+            io_sel <= "1011";
+            input_char <= char_result(14 downto 10);
+          when "10" => -- Third digit
+            io_sel <= "1101";
+            input_char <= char_result(9 downto 5);
+          when "11" => -- Fourth digit
+            io_sel <= "1110";
+            input_char <= char_result(4 downto 0);
+		  when others =>
+		    io_sel <= "1111";
+        end case;
+    else -- Animations and Numbers
+        case (io_segActivate) is
+          when "00" => -- First digit
+            io_sel <= "0111";
+            input_BCD <= BCD_result(15 downto 12);
+          when "01" => -- Second digit
+            io_sel <= "1011";
+            input_BCD <= BCD_result(11 downto 8);
+          when "10" => -- Third digit
+            io_sel <= "1101";
+            input_BCD <= BCD_result(7 downto 4);
+          when "11" => -- Fourth digit
+            io_sel <= "1110";
+            input_BCD <= BCD_result(3 downto 0);
+		  when others =>
+		    io_sel <= "1111";
+        end case;
+    end if;
+    
+    
+    -- The state machine.
+    case (state) is
+      -- First state if no reset.
+      when init =>
+        led(0) <= '1';
+        ln <= "10";
+        init_count := init_count + 1;
+        if (init_count < 50000000) then 
+            BCD_result <= "1000010000000000"; -- HI
+        elsif (init_count > 50000000) then 
+            BCD_result <= "0000001011110001"; -- :-]
+        elsif (init_count = 100000000) then
+            init_count := 0;
+        end if;
+
+        -- Switch Debouncer
+        flipflop(0) <= io_op(0);                        -- Store button value in 1st flipflop
+     	flipflop(1) <= flipflop(0);                     -- Update at different cycles to check for consistency                              -- Store 1st flipflop value in 2nd flipflop
+     	If (flipflop(0) /= flipflop(1)) THEN            -- Reset counter because input is changing
+       	  count := 0;                                   -- Clear the counter whenever they are not equal
+     	ELSIF(count < 100000000 and flipflop(1) = '1') THEN  -- Stable input time is not yet met and the button is still pressed
+      	  count := count + 1;                           -- Increment counter
+      	ELSIF (count = 100000000) then                  -- Stable input time is met
+       	  state <= toop;                                 -- Changes state
+       	  count := 0;                                   -- Reset
+      	END IF;
+
+
+      -- Inbetween state
+      when toop =>
+        ln <= "00"; -- Displaying letters
+        char_result <= "11110000010000000000"; -- "op"
+        state <= operation;
+
+      -- State that selects operation.
+      when operation =>
+     	if (io_op(3) = '1') then
+     	  ln <= "00";
+     	  op := 3;
+     	  char_result <= "01000110101100000000"; -- ARI
+     	elsif (io_op(1) = '1') then
+     	  ln <= "00";
+     	  op := 1;
+     	  char_result <= "10010111100111000000"; -- LOG
+     	elsif (io_op(4) = '1') then
+     	  ln <= "00";
+     	  op := 4;
+     	  char_result <= "01001001011111000000"; -- STO
+     	elsif (io_op(2) = '1') then
+     	  ln <= "00";
+     	  op := 2;
+     	  char_result <= "10010111100100000010"; -- LOAD
+	    else
+	      ln <= "00";
+          char_result <= "11110000010000000000"; -- OP
+     	end if;	
+
+     	led(1) <= '1'; -- Indicator E
+        flipflop(0) <= io_op(op);                        -- Store button value in 1st flipflop
+     	flipflop(1) <= flipflop(0);                     -- Update at different cycles to check for consistency
+     	If (flipflop(0) /= flipflop(1)) THEN            -- Reset counter because input is changing
+       	  count := 0;                                   -- Clear the counter whenever they are not equal
+     	ELSIF(count < 100000000 and flipflop(1) = '1') THEN  -- Stable input time is not yet met and the button is still pressed
+      	  count := count + 1;                           -- Increment counter
+      	ELSIF (count = 100000000) then                  -- Stable input time is met
+       	  count := 0;
+		if (op = 3) then
+			state <= arith;
+			op := 6;
+		elsif (op = 1) then
+			state <= logic;
+			op := 6;
+		elsif (op = 4) then
+			state <= store; -- Storing numbers to memory.
+			op := 6;
+		elsif (op = 2) then
+			state <= load;
+			op := 6;
+		end if;
+	end if;
+		-- Choosing arithmetic operations
+      when store =>
+		 ln <= "11";
+		 operand_1 <= io_dip(23 downto 8);
+         
+        if (operand_1 > "10011100001111") then
+            ln <= "00";
+            char_result <= "01010110101101000000"; -- ERR
+            io_led <= "000000000000000000000000"; -- Clears LEDs
+        else     
+          ln <= "11";
+          BCD_result <= to_bcd(io_dip(23 downto 8));
+            if (io_dip(7 downto 0) > "00000000") then
+              ln <= "11";
+              addr := to_integer(unsigned(io_dip(7 downto 0)));
+              io_led(7 downto 0) <= io_dip(7 downto 0);
+            end if;
+          -- Switch Debouncer
+          flipflop(0) <= io_op(0);                        -- Store button value in 1st flipflop
+     	  flipflop(1) <= flipflop(0);                     -- Update at different cycles to check for consistency
+     	  If (flipflop(0) /= flipflop(1)) THEN            -- Reset counter because input is changing
+       	    count := 0;                                   -- Clear the counter whenever they are not equal
+     	  ELSIF(count < 100000000 and flipflop(1) = '1') THEN  -- Stable input time is not yet met and the button is still pressed
+      	    count := count + 1;                           -- Increment counter
+      	  ELSIF (count = 100000000) then 
+      	    arry(addr) <= operand_1; 
+      	    count := 0;                  
+            state <= init;                                                           
+          END IF;
+        end if;
+       
+-- Loading the saved data.
+      when load =>
+        ln <= "11";
+        led(2) <= '1';
+        BCD_result <= to_bcd(arry(addr));
+        addr := to_integer(unsigned(io_dip(7 downto 0)));
+        io_led(7 downto 0) <= io_dip(7 downto 0);
+        
+-- Math operation selection.
+      when arith =>
+        led(2) <= '1';
+        if (io_op(1) = '1') then -- Selecting Addition
+          ln <= "00";
+          op := 1;
+			    char_result <= "01000000100001000000"; -- ADD
+			    oper_sel <= add;
+        elsif (io_op(2) = '1') then -- Selecting Subtraction
+          ln <= "00";
+          op := 2;
+			    char_result <= "01001011010010000000"; -- SUB
+			    oper_sel <= sub;
+        elsif (io_op(3) = '1') then -- Selecting Multiplication
+          ln <= "00";
+          op := 3;
+		  char_result <= "10101101010101110010"; -- MUL
+	      oper_sel <= mul;
+	    elsif (io_op(4) = '1') then
+	      ln <= "00";
+	      op := 4;
+	      char_result <= "00010110000110100000"; -- DIV
+	      oper_sel <= div;
+        elsif (io_op(0) = '1') then
+          ln <= "00";
+          op := 0;
+          char_result <= "00100010000110000000"; -- BAC
+     	end if;
+        flipflop(0) <= io_op(op);                        -- Store button value in 1st flipflop
+     	flipflop(1) <= flipflop(0);                     -- Update at different cycles to check for consistency
+     	If (flipflop(0) /= flipflop(1)) THEN            -- Reset counter because input is changing
+       	  count := 0;                                   -- Clear the counter whenever they are not equal
+     	ELSIF(count < 100000000 and flipflop(1) = '1') THEN  -- Stable input time is not yet met and the button is still pressed
+      	  count := count + 1;                           -- Increment counter
+      	ELSIF (count = 100000000) then
+       	  count := 0; 
+      	  if (op = 0) then
+            state <= toop;
+            io_led(2) <= '0';
+          else
+	        state <= toin;
+	      end if;
+	    end if;
+      -- Choosing logical operations
+      when logic =>
+        led(2) <= '1';
+        if (io_op(4) = '1') then -- Selecting Comparison
+          ln <= "00";
+          op := 4;
+	      char_result <= "01100111100000000000"; -- CO
+	      oper_sel <= comp;
+        elsif (io_op(3) = '1') then -- Selecting Right Shift
+          ln <= "00";
+          op := 3;
+          char_result <= "01001100000000011010"; -- SH r
+          oper_sel <= sh_r;
+        elsif (io_op(2) = '1') then -- Selecting Left Shift
+          ln <= "00";
+          op := 2;
+          char_result <= "01001100000000010010"; -- SH L
+          oper_sel <= sh_l;
+        elsif (io_op(0) = '1') then
+          ln <= "00";
+          op := 0;
+          char_result <= "00100010000110000000"; -- BAC
+     	end if;
+        flipflop(0) <= io_op(op);                        -- Store button value in 1st flipflop
+     	flipflop(1) <= flipflop(0);                     -- Update at different cycles to check for consistency
+     	If (flipflop(0) /= flipflop(1)) THEN            -- Reset counter because input is changing
+       	  count := 0;                                   -- Clear the counter whenever they are not equal
+     	ELSIF(count < 100000000 and flipflop(1) = '1') THEN  -- Stable input time is not yet met and the button is still pressed
+      	  count := count + 1;                           -- Increment counter
+      	ELSIF (count = 100000000) then
+       	  count := 0; 
+      	  if (op = 0) then
+            state <= toop;
+            io_led(2) <= '0';
+          else
+	        state <= toin;
+	      end if;
+	    else
+	      ln <= "00";
+	      op := 6;
+          char_result <= "10010111100111000000"; -- LOG
+	    end if;
+
+--Inbetween state that displays a message
+      when toin =>
+        ln <= "00"; -- Displaying letters
+        char_result <= "11000101101100000000"; -- "In 1"
+      	count := count + 1;                           -- Increment counter
+      	IF (count = 150000000) then                  -- Time is met
+       	  state <= in1;                                 -- Changes state
+       	  count := 0;                                   -- Reset count
+      	END IF;
+      	
+      -- State that determines first input.
+      when in1 =>
+         led(3) <= '1';
+		 ln <= "11";
+		 operand_1 <= io_dip(23 downto 8);
+        if (io_dip(7 downto 0) > "00000000") then
+           ln <= "00";
+           addr := to_integer(unsigned(io_dip(7 downto 0)));
+           io_led(7 downto 0) <= io_dip(7 downto 0);
+           BCD_result <= to_bcd(arry(addr));
+        elsif (operand_1 > "10011100001111") then
+            ln <= "00";
+            char_result <= "01010110101101000000"; -- ERR
+            io_led <= "000000000000000000000000"; -- Clears LEDs
+        else
+		    io_led <= operand_1 & "00000000";
+            ln <= "11";
+            BCD_result <= to_bcd(io_dip(23 downto 8));
+        end if;
+        -- Switch Debouncer
+        flipflop(0) <= io_op(0);                        -- Store button value in 1st flipflop
+     	flipflop(1) <= flipflop(0);                     -- Update at different cycles to check for consistency
+     	If (flipflop(0) /= flipflop(1)) THEN            -- Reset counter because input is changing
+       	  count := 0;                                   -- Clear the counter whenever they are not equal
+     	ELSIF(count < 100000000 and flipflop(1) = '1') THEN  -- Stable input time is not yet met and the button is still pressed
+      	  count := count + 1;                           -- Increment counter
+      	ELSIF (count = 100000000) then  
+      	  count := 0;                  
+      	  if (oper_sel = sh_l or oper_sel = sh_r) then
+      	    state <= to_sh;
+      	  else
+       	    state <= toin2;   
+       	  end if;                                                            
+        END IF;
+      	
+      when to_sh =>
+        ln <= "00"; -- Displaying letters
+        char_result <= "01001100000000000000"; -- SH
+      	count := count + 1;                           -- Increment counter
+      	IF (count = 150000000) then                  -- Time is met
+       	  state <= in2;                                 -- Changes state
+       	  count := 0;                                   -- Reset count
+      	END IF;
+      	
+      -- Inbetween state
+      when toin2 =>
+        ln <= "00"; -- Displaying letters
+        char_result <= "11000101100011100000"; -- "In 2"
+      	count := count + 1;                           -- Increment counter
+      	IF (count = 150000000) then                  -- Time is met
+       	  state <= in2;                                 -- Changes state
+       	  count := 0;                                   -- Reset count
+      	END IF;
+
+      -- State that determines second input.
+      when in2 =>
+         led(4) <= '1'; -- Indicator
+	     ln <= "11";
+		 operand_2 <= io_dip(23 downto 8);
+         sh := to_integer(unsigned(operand_2));
+         if (io_dip(7 downto 0) > "00000000") then
+           ln <= "00";
+           addr := to_integer(unsigned(io_dip(7 downto 0)));
+           io_led(7 downto 0) <= io_dip(7 downto 0);
+           BCD_result <= to_bcd(arry(addr));
+         elsif (operand_2 > "10011100001111") then
+            ln <= "00";
+            char_result <= "01010110101101000000"; -- ERR
+            io_led <= "000000000000000000000000"; -- Clears LEDs
+         else
+	   	    io_led <= operand_2 & "00000000";
+            ln <= "11";
+            BCD_result <= to_bcd(io_dip(23 downto 8));
+         end if;
+
+         -- Switch Debouncer
+         flipflop(0) <= io_op(0);                        -- Store button value in 1st flipflop
+      	 flipflop(1) <= flipflop(0);                     -- Update at different cycles to check for consistency
+      	 If (flipflop(0) /= flipflop(1)) THEN            -- Reset counter because input is changing
+           count := 0;                                   -- Clear the counter whenever they are not equal
+      	 ELSIF(count < 100000000 and flipflop(1) = '1') THEN  -- Stable input time is not yet met and the button is still pressed
+       	   count := count + 1;                           -- Increment counter
+       	 ELSIF (count = 100000000) then                  -- Stable input time is met
+           state <= toresult;                                 -- Changes state
+           count := 0;                                   -- Reset
+       	 END IF;
+
+      when toresult => -- Dance party!
+        if (oper_sel = sh_l or oper_sel = sh_r) then
+            io_led <= operand_1 & "00000000";
+        end if;
+        ln <= "01";
+        count := count + 1;
+        if (count = 10000000 or count = 50000000 or count = 90000000 or count = 130000000) then 
+            BCD_result <= "1000101010110101"; 
+        elsif (count = 20000000 or count = 60000000 or count = 100000000 or count = 140000000) then 
+            BCD_result <= "0100101010110011"; 
+        elsif (count = 30000000 or count = 70000000 or count = 110000000) then 
+            BCD_result <= "0010111111111100"; 
+        elsif (count = 40000000 or count = 80000000 or count = 120000000) then 
+            BCD_result <= "0100111111110011";
+        elsif (count = 150000000) then
+            count := 0;
+            state <= result;
+        end if;
+        
+      -- State that displays result. Requires reset to continue.
+      when result =>
+        led(5) <= '1';
+        if (io_dip(7 downto 0) > "00000000") then
+           ln <= "00";
+           addr := to_integer(unsigned(io_dip(7 downto 0)));
+           io_led(7 downto 0) <= io_dip(7 downto 0);
+     	   char_result <= "01001001011111000000"; -- STO
+     	   flipflop(0) <= io_op(0);                        -- Store button value in 1st flipflop
+      	   flipflop(1) <= flipflop(0);                     -- Update at different cycles to check for consistency
+      	if (flipflop(0) /= flipflop(1)) THEN            -- Reset counter because input is changing
+          count := 0;                                   -- Clear the counter whenever they are not equal
+      	ELSIF(count < 100000000 and flipflop(1) = '1') THEN  -- Stable input time is not yet met and the button is still pressed
+       	  count := count + 1;                           -- Increment counter
+       	ELSIF (count = 100000000) then                  -- Stable input time is met
+          state <= init;                                 -- Changes state
+          count := 0;                                   -- Reset
+       	END IF;
+        elsif (output > "10011100001111") then
+          ln <= "00";
+          char_result <= "01010110101101000000"; -- ERR
+          io_led <= "000000000000000000000000"; -- Clears LEDs
+        elsif (oper_sel = comp) then
+        -- Stops BCD_result from changing, it is adjusted in ALU code above.
+        else
+            io_led <= output & "00000000";
+      	    arry(addr) <= output;
+            ln <= "11";
+            BCD_result <= to_bcd(output);
+        end if;
+      end case;
+    end if;
+  end process;
+end Behavioral;

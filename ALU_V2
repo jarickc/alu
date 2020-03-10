@@ -57,28 +57,7 @@ architecture Behavioral of State_Machine is
   -- The base dividend that is shifted into for division.
   signal int_quot : STD_LOGIC_VECTOR(15 downto 0) := (others => '0'); 
   -- Allows the quotient to be built over 15 loops.
-  
-  function  divide  (a : STD_LOGIC_VECTOR; b : STD_LOGIC_VECTOR) return STD_LOGIC_VECTOR is
-    variable a1 : STD_LOGIC_VECTOR(a'length-1 downto 0):=a;
-    variable b1 : STD_LOGIC_VECTOR(b'length-1 downto 0):=b;
-    variable p1 : STD_LOGIC_VECTOR(b'length downto 0):= (others => '0');
-    variable i : integer:=0;
-    begin
-    for i in 0 to b'length-1 loop
-      p1(b'length-1 downto 1) := p1(b'length-2 downto 0);
-      p1(0) := a1(a'length-1);
-      a1(a'length-1 downto 1) := a1(a'length-2 downto 0);
-      p1 := p1-b1;
-      if(p1(b'length-1) ='1') then
-        a1(0) :='0';
-      p1 := p1+b1;
-    else
-      a1(0) :='1';
-    end if;
-  end loop;
-return a1;
-end divide;
-
+ 
   function to_bcd ( bin : std_logic_vector(15 downto 0) ) return std_logic_vector is
     -- Used to convert a binary input to BCD.
     variable i : integer:=0;
@@ -121,6 +100,10 @@ begin -- Architecture begins.
     VARIABLE op : INTEGER RANGE 0 to 6;
     VARIABLE addr : INTEGER RANGE 0 to 255;
     variable sh : natural := 0;
+    variable a1 : STD_LOGIC_VECTOR(15 downto 0);
+    variable b1 : STD_LOGIC_VECTOR(15 downto 0);
+    variable p1 : STD_LOGIC_VECTOR(15 downto 0):= (others => '0');
+    variable i : integer:=0;
   begin
     if (rst_n = '0') then
     -- Reset state, has priority over all states.
@@ -216,10 +199,10 @@ begin -- Architecture begins.
         when "10001" => io_seg <= "10011001"; -- 4.
         when "11001" => io_seg <= "10010010"; -- 5.
         when "10101" => io_seg <= "11001000"; -- M.
-	    when "11101" => io_seg <= "10100100"; -- 
-	    when "10011" => io_seg <= "10001100"; -- 
-        when "11011" => io_seg <= "10001000"; -- 
-        when "10111" => io_seg <= "10100001"; -- 
+	    when "11101" => io_seg <= "11111011"; -- i.
+	    when "10011" => io_seg <= "11100011"; -- u.
+        when "11011" => io_seg <= "11100111"; -- l.
+        when "10111" => io_seg <= "11101111"; -- i2.
         when "11111" => io_seg <= "11000001"; -- 
         when others => io_seg <= "11111111"; -- Nothing Displayed from "0000"
       end case;
@@ -249,11 +232,25 @@ begin -- Architecture begins.
             output <= mul_v(15 downto 0);
         end if;
       when div => -- OP_2 is divisor, OP_1 is dividend
+        a1 := operand_1;
+        b1 := operand_2;
         if operand_2 = "0000000000000000" THEN
           output <= "1111111111111111"; -- Error condition
         else
-          output <= divide (operand_1, operand_2);
-       end if;
+          for i in 0 to 15 loop
+            p1(15 downto 1) := p1(14 downto 0);
+            p1(0) := a1(15);
+            a1(15 downto 1) := a1(14 downto 0);
+            p1 := p1-b1;
+            if(p1(14) ='1') then
+              a1(0) :='0';
+              p1 := p1+b1;
+            else
+              a1(0) :='1';
+            end if;
+          end loop;
+          output <= a1;
+        end if;
        
       when comp =>
         ln <= "11";
@@ -349,7 +346,7 @@ begin -- Architecture begins.
      	if (io_op(3) = '1') then
      	  ln <= "00";
      	  op := 3;
-     	  char_result <= "01000110101100000000"; -- ARI
+     	  char_result <= "01000110101011100000"; -- ARI
      	elsif (io_op(1) = '1') then
      	  ln <= "00";
      	  op := 1;
@@ -445,12 +442,12 @@ begin -- Architecture begins.
         elsif (io_op(3) = '1') then -- Selecting Multiplication
           ln <= "00";
           op := 3;
-		  char_result <= "10101101010101110010"; -- MUL
+		  char_result <= "10101101011001110010"; -- MUL
 	      oper_sel <= mul;
 	    elsif (io_op(4) = '1') then
 	      ln <= "00";
 	      op := 4;
-	      char_result <= "00010110000110100000"; -- DIV
+	      char_result <= "00010111010110100000"; -- DIV
 	      oper_sel <= div;
         elsif (io_op(0) = '1') then
           ln <= "00";
